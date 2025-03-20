@@ -1,0 +1,413 @@
+---
+title: "Section 6: Quantifying the Impact of Weather on Crop Yields (Continued)"
+author: "Shuo Yu"
+format: pdf
+date: "2/26/2024"
+---
+
+Before we begin today's section, please take 5 minutes to fill out the [midterm discussion section evaluation form](https://forms.gle/M4Hj8iAzYAwqyPib6). Your feedback is valuable and helps improve the course experience. Thank you!
+
+```{r}
+#| warning: false
+
+rm(list = ls())
+
+library(tidyverse)
+library(fixest)
+
+setwd("C:/Users/shuoy/Dropbox/161/Sections/Section6")
+```
+
+## Data
+
+```{r}
+full_df <- read.csv("YieldWeather.csv", header = TRUE)
+# Convert GEOID to 5-digit character format
+full_df <- full_df %>%
+  mutate(GEOID = sprintf("%05d", GEOID))
+
+wp245 <- read.csv("WeatherProjection245.csv", header = TRUE)
+wp245 <- wp245 %>%
+  mutate(GEOID = sprintf("%05d", GEOID)) %>%
+  mutate(Year = Year-1980)
+wp585 <- read.csv("WeatherProjection585.csv", header = TRUE)
+wp585 <- wp585 %>%
+  mutate(GEOID = sprintf("%05d", GEOID)) %>%
+  mutate(Year = Year-1980)
+```
+
+Let's use corn yields as an example. You can follow similar steps and adjust the code to obtain results for soybeans.
+
+```{r}
+# Drops rows with missing values (na.omit())
+corn_df <- full_df %>% 
+  select(-SoyYield) %>%
+  na.omit()
+
+# Filters counties that have at least 21 observations to ensure major corn growing counties with enough data points
+corn_df <- corn_df %>% 
+  group_by(GEOID) %>% 
+  filter(n() > 20) %>% 
+  ungroup()
+```
+
+## Panel Regression Analysis by Region
+
+To assess the impact of weather on corn yield, we conduct a panel regression separately for counties east and west of the 100th meridian line, a historically significant climatic divide in the United States. The regression model is specified as follows:
+
+$$
+CornYield_{it} = \beta_{0} + \beta_{1} GDD_{it} + \beta_{2} EDD_{it} + \beta_{3} PPT_{it} + \beta_{4} PPT^{2}_{it} + \alpha_{i} + \delta_{t} + \gamma_{i}Year_{it}  + \varepsilon_{it}
+$$
+
+-   Outcome variable: $CornYield_{it}$ – Corn yield in county i and year t
+
+-   Independent variables:
+
+    -   $GDD_{it}$ – Growing degree days during the growing season (April to September)
+
+    -   $EDD_{it}$ – Extreme degree days during the growing season
+
+    -   $PPT_{it}$ – Cumulative precipitation during the growing season
+
+-   **County Fixed Effects** ($\alpha_{i}$): Removes the impact of factors that differ across counties but stay the same over time (e.g., soil quality, local policies).
+
+-   **Year Fixed Effects** ($\delta_{t}$): Controls for yearly shocks affecting all counties (e.g., nationwide economic conditions, federal policies).
+
+-   **County-Specific Time Trends** ($\gamma_{i}$): Allows each county to have its own trend over time (e.g., gradual technology adoption in some regions).
+
+-   $\varepsilon_{it}$ represents the error term, capturing unobserved factors affecting corn yield.
+
+### Spatial Heterogeneity
+
+```{r}
+# Summary statistics based on whether the county is located east or west of the 100th meridian line
+# East of the 100th meridian line
+corn_df %>%
+  filter(east_dummy==1) %>%
+  summary()
+
+# West of the 100th meridian line
+corn_df %>%
+  filter(east_dummy==0) %>%
+  summary()
+```
+
+### Map of Counties Included in the Regression East of the 100th Meridian
+
+```{r}
+#| echo: FALSE
+#| warning: FALSE
+#| message: FALSE
+
+# Load necessary libraries
+library(sf)
+library(tigris)
+
+# Load county boundaries for the lower 48 states
+counties <- tigris::counties(cb = TRUE, class = "sf") %>%
+  filter(!(STATEFP %in% c("02", "15", "72", "78", "66", "69", "60")))  # Exclude AK, HI, PR, VI, GU, MP, AS
+
+# Select necessary columns from corn_data (GEOID, east_dummy)
+corn_data_filtered <- corn_df %>%
+  select(GEOID, east_dummy) %>%
+  distinct()
+
+# Merge county boundaries with east_dummy information
+counties <- counties %>%
+  left_join(corn_data_filtered, by = "GEOID") %>%
+  mutate(is_east = case_when(
+    east_dummy == 1 ~ "Highlighted",
+    east_dummy == 0 ~ "Non-Highlighted",
+    TRUE ~ "Unknown"  # Assign a category for NA values
+  ))
+
+# Plot: Black boundaries for all counties, color by east_dummy
+ggplot(data = counties) +
+  geom_sf(aes(fill = is_east), color = "black", size = 0.1) +  # Black boundaries for all counties
+  scale_fill_manual(values = c("Highlighted" = "red", "Non-Highlighted" = "blue", "Unknown" = "white"), guide = FALSE) +  # Ensure all categories are mapped
+  theme_minimal() +
+  ggtitle("Counties East of the 100th Meridian") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### East of 100th Meridian Line
+
+```{r}
+fe_east <- feols(CornYield ~ gdd + edd + ppt + I(ppt^2) | 
+                  Year + GEOID[Year], 
+                  data = corn_df[corn_df$east_dummy==1, ])
+
+summary(fe_east)
+```
+
+### West of 100th Meridian Line
+
+```{r}
+fe_west <- feols(CornYield ~ gdd + edd + ppt + I(ppt^2) | 
+                  Year + GEOID[Year], 
+                  data = corn_df[corn_df$east_dummy==0, ])
+
+summary(fe_west)
+```
+
+## Predictions Based on Weather Projections
+
+### **Climate Model and Future Weather Projections**
+
+To project the impact of climate change on corn yields, we utilize future climate scenarios from the CanESM5 model ([data source: Google Earth Engine](https://developers.google.com/earth-engine/datasets/catalog/NASA_GDDP-CMIP6)), a widely recognized Earth system model that simulates future temperature and precipitation patterns.
+
+We consider two Shared Socioeconomic Pathway (SSP) scenarios:
+
+-   SSP5-8.5 (High Emissions Scenario): Represents a future characterized by continued fossil fuel dependency, leading to substantial warming and increased climate extremes.
+
+-   SSP2-4.5 (Intermediate Emissions Scenario): Assumes moderate emissions reduction policies, resulting in more gradual warming trends.
+
+For each county, we extract climate projections for the period 2025–2100, incorporating temperature and precipitation variables, and apply the estimated regression coefficients to predict future yield changes. First, let's visualize the trends in weather variables over time.
+
+```{r}
+# Visualizing the time trend of average temperature under different scenarios
+# Compute yearly average temperature for each dataset
+avg_temp_585 <- wp585 %>%
+  group_by(Year) %>%
+  summarise(Avg_Temperature = mean(tavg, na.rm = TRUE))
+
+avg_temp_245 <- wp245 %>%
+  group_by(Year) %>%
+  summarise(Avg_Temperature = mean(tavg, na.rm = TRUE))
+
+# Combine the datasets for plotting
+avg_temp_585$Scenario <- "SSP5-8.5"
+avg_temp_245$Scenario <- "SSP2-4.5"
+
+combined_data <- bind_rows(avg_temp_585, avg_temp_245)
+
+# Plot the time trend
+ggplot(combined_data, aes(x = Year, y = Avg_Temperature, color = Scenario)) +
+  geom_line(linewidth = 1) +
+  labs(title = "Projected Average Temperature Trends (2025-2100)",
+       x = "Year",
+       y = "Average Temperature (°C)",
+       color = "Climate Scenario") +
+  theme_minimal()
+```
+
+**Question**: Describe the trends you observe in the figure. What patterns do you notice, and how do they change over time?
+
+The figure shows the projected average temperature trends from 2025 to 2100 under two climate scenarios: SSP2-4.5 (moderate emissions) and SSP5-8.5 (high emissions). The y-axis represents average temperature (°C), while the x-axis represents years. The SSP5-8.5 scenario (blue line) shows a sharper increase in temperature over time compared to the SSP2-4.5 scenario (red line), which exhibits a more gradual rise. This suggests that higher emissions lead to greater temperature increases by the end of the century.
+
+```{r}
+# Compute yearly average precipitation for each dataset
+avg_ppt_585 <- wp585 %>%
+  group_by(Year) %>%
+  summarise(Avg_Precipitation = mean(ppt, na.rm = TRUE))
+
+avg_ppt_245 <- wp245 %>%
+  group_by(Year) %>%
+  summarise(Avg_Precipitation = mean(ppt, na.rm = TRUE))
+
+# Combine the datasets for plotting
+avg_ppt_585$Scenario <- "SSP5-8.5"
+avg_ppt_245$Scenario <- "SSP2-4.5"
+
+combined_data <- bind_rows(avg_ppt_585, avg_ppt_245)
+
+# Plot the time trend for precipitation
+ggplot(combined_data, aes(x = Year, y = Avg_Precipitation, color = Scenario)) +
+  geom_line(size = 1) +
+  labs(title = "Projected Average Precipitation Trends (2025-2100)",
+       x = "Year",
+       y = "Average Precipitation (mm)",
+       color = "Climate Scenario") +
+  theme_minimal()
+```
+
+**Question**: Describe the trends you observe in the figure. What patterns do you notice, and how do they change over time?
+
+The figure shows the projected average precipitation trends from 2025 to 2100 under two climate scenarios. The y-axis represents average precipitation (mm), while the x-axis represents years. Both scenarios exhibit high interannual variability, with no clear long-term trend. While precipitation levels fluctuate significantly under both scenarios, SSP5-8.5 (blue line) appears to have slightly more extreme variations compared to SSP2-4.5 (red line).
+
+```{r}
+# Filter data for the year 2100
+ppt_585_2100 <- wp585 %>%
+  filter(Year == 120) %>%
+  mutate(Scenario = "SSP5-8.5")
+
+ppt_245_2100 <- wp245 %>%
+  filter(Year == 120) %>%
+  mutate(Scenario = "SSP2-4.5")
+
+# Combine datasets for plotting
+combined_ppt_2100 <- bind_rows(ppt_585_2100, ppt_245_2100)
+
+# Plot histograms
+ggplot(combined_ppt_2100, aes(x = ppt, fill = Scenario)) +
+  geom_density(alpha = 0.5, color = "black") +
+  scale_fill_manual(values = c("SSP5-8.5" = "blue", "SSP2-4.5" = "red")) +
+  labs(title = "Precipitation Distribution in 2100 Under Different Scenarios",
+       x = "Precipitation (mm)",
+       y = "Count",
+       fill = "Scenario") +
+  theme_minimal()
+```
+
+**Question**: What trends do you observe in the distributions? Compare the peaks, spread, and overall shape of the two scenarios. What does this suggest about the impact of different climate scenarios on precipitation patterns?
+
+The figure displays the precipitation distribution in 2100 under two climate scenarios. The x-axis represents precipitation (mm), while the y-axis shows the density (normalized count). SSP2-4.5 exhibits a more concentrated distribution with a peak at lower precipitation values, whereas SSP5-8.5 shows a broader distribution with higher precipitation extremes, suggesting greater variability and more frequent extreme precipitation events under the high-emissions scenario.
+
+### USDA Farm Production Regions
+
+The USDA's [Farm Production Regions](https://www.ers.usda.gov/publications/pub-details?pubid=42299) are traditional groupings of U.S. states, organized based on predominant farming activities, geographic features, and climatic conditions. These regions facilitate the analysis and reporting of agricultural data by grouping areas with similar agricultural practices.
+
+![](MLU-Shares-by-Region.png){width="580"}
+
+For example, the **Northeast region** includes states such as Maine, New York, and Pennsylvania, known for diverse agricultural activities, including dairy farming, fruit production, and horticulture. The **Lake States**, comprising Michigan, Wisconsin, and Minnesota, are notable for dairy farming as well as corn and soybean production. The **Corn Belt**, which includes Iowa, Illinois, Indiana, Missouri, and Ohio, is the heart of U.S. grain production, primarily cultivating corn and soybeans. The **Northern Plains**, covering North Dakota, South Dakota, Nebraska, and Kansas, specializes in wheat, corn, and soybean farming, along with significant cattle ranching. The **Southern Plains**, consisting of Oklahoma and Texas, supports a diverse agricultural economy with wheat, cotton, and cattle production. The **Pacific region**, which includes Washington, Oregon, and California, features a highly varied agricultural landscape, producing fruits, vegetables, nuts, and wine.
+
+### Predictions
+
+#### Extract Model Coefficients
+
+```{r}
+coeff_west <- coef(fe_west)
+coeff_east <- coef(fe_east)
+
+print(coeff_west)  # Check if coefficients exist
+print(coeff_east)
+
+# Extract fixed effects from fe_east
+fixef_east <- fixef(fe_east)
+# Extract county fixed effects (GEOID), year fixed effects (Year), and county-year fixed effects (GEOID[Year])
+geo_fe_east <- fixef_east$GEOID
+year_fe_east <- fixef_east$Year
+geo_year_fe_east <- fixef_east$`GEOID[[Year]]`  # Extract full county-year fixed effects
+
+# Extract fixed effects from fe_west
+fixef_west <- fixef(fe_west)
+geo_fe_west <- fixef_west$GEOID
+year_fe_west <- fixef_west$Year
+geo_year_fe_west <- fixef_west$`GEOID[[Year]]`
+```
+
+#### Compute Predictions
+
+1.  **Computing an Approximate Intercept**: The approximate intercept accounts for fixed effects (county-level, year-level, and county-year interactions) to provide a baseline for prediction.
+
+```{r}
+# Compute an Approximate Intercept
+# Compute the mean of all fixed effects (county, year, and county-year)
+approx_intercept_east <- mean(unlist(geo_fe_east), na.rm = TRUE) + 
+                         mean(unlist(year_fe_east), na.rm = TRUE) + 
+                         mean(unlist(geo_year_fe_east), na.rm = TRUE)*43
+approx_intercept_west <- mean(unlist(geo_fe_west), na.rm = TRUE) + 
+                         mean(unlist(year_fe_west), na.rm = TRUE) + 
+                         mean(unlist(geo_year_fe_west), na.rm = TRUE)*43
+```
+
+2.  **Computing Predictions for SSP2-4.5**
+
+```{r}
+# Compute predictions for west counties
+wp245 <- wp245 %>%
+  mutate(pred_yield_west = approx_intercept_west + 
+           coeff_west["gdd"] * gdd +
+           coeff_west["edd"] * edd +
+           coeff_west["ppt"] * ppt +
+           coeff_west["I(ppt^2)"] * ppt^2)
+
+# Compute predictions for east counties
+wp245 <- wp245 %>%
+  mutate(pred_yield_east = approx_intercept_east + 
+           coeff_east["gdd"] * gdd +
+           coeff_east["edd"] * edd +
+           coeff_east["ppt"] * ppt +
+           coeff_east["I(ppt^2)"] * ppt^2)
+
+# Assigning the final predicted yield
+wp245 <- wp245 %>%
+  mutate(pred_yield = ifelse(east_dummy == 0, pred_yield_west, pred_yield_east))
+```
+
+3.  **Computing Predictions for SSP5-8.5**
+
+```{r}
+# Compute predictions for west counties
+wp585 <- wp585 %>%
+  mutate(pred_yield_west = approx_intercept_west + 
+           coeff_west["gdd"] * gdd +
+           coeff_west["edd"] * edd +
+           coeff_west["ppt"] * ppt +
+           coeff_west["I(ppt^2)"] * ppt^2)
+
+# Compute predictions for east counties
+wp585 <- wp585 %>%
+  mutate(pred_yield_east = approx_intercept_east + 
+           coeff_east["gdd"] * gdd +
+           coeff_east["edd"] * edd +
+           coeff_east["ppt"] * ppt +
+           coeff_east["I(ppt^2)"] * ppt^2)
+
+# Assigning the final predicted yield
+wp585 <- wp585 %>%
+  mutate(pred_yield = ifelse(east_dummy == 0, pred_yield_west, pred_yield_east))
+```
+
+#### Predicted Trends for Different Regions
+
+```{r}
+# List of regions to analyze
+regions <- c("Lake_States", "Pacific", "Mountain", "Southern_Plains", "Corn_Belt", "Northern_Plains")
+
+# Compute average yield trends for each scenario and region
+avg_yield_585 <- wp585 %>%
+  filter(district %in% regions) %>%
+  group_by(Year, district) %>%
+  summarise(Avg_Yield = mean(pred_yield, na.rm = TRUE), .groups = "drop") %>%
+  mutate(Scenario = "SSP5-8.5")
+
+avg_yield_245 <- wp245 %>%
+  filter(district %in% regions) %>%
+  group_by(Year, district) %>%
+  summarise(Avg_Yield = mean(pred_yield, na.rm = TRUE), .groups = "drop") %>%
+  mutate(Scenario = "SSP2-4.5")
+
+# Combine both datasets
+combined_data <- bind_rows(avg_yield_585, avg_yield_245)
+
+# Find global min and max for y-axis
+y_min <- min(combined_data$Avg_Yield, na.rm = TRUE)
+y_max <- max(combined_data$Avg_Yield, na.rm = TRUE)
+
+# Plot with fixed y-axis
+ggplot(combined_data, aes(x = Year, y = Avg_Yield, color = Scenario)) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~ district, scales = "fixed") +  # Fix y-axis across regions
+  ylim(y_min, y_max) +  # Set y-axis limits manually
+  labs(title = "Projected Average Yield Trends by Region (2025-2100)",
+       x = "Year",
+       y = "Average Yield (Bu/Acre)",
+       color = "Climate Scenario") +
+  theme_minimal()
+
+```
+
+**Questions:**
+
+1.  Examine the projected average yield trends for different regions under the two climate scenarios (SSP2-4.5 and SSP5-8.5) from 2025 to 2100. What patterns do you observe in yield trends across regions? How do the trends differ between the two scenarios?
+
+Yields decrease across all regions, with steeper declines under SSP5-8.5 (blue) compared to SSP2-4.5 (red). SSP2-4.5: More moderate declines, suggesting some adaptation potential. SSP5-8.5: Stronger yield losses, particularly in heat-vulnerable southern regions.
+
+2.  Which regions appear to be most negatively impacted under SSP5-8.5, and what might be driving these differences?
+
+-   Corn Belt & Northern Plains: Sharp declines, especially under SSP5-8.5.
+
+-   Lake States: Gradual decline; divergence between scenarios increases over time.
+
+-   Mountain & Pacific: More stable trends, less sensitivity.
+
+-   Southern Plains: Highly volatile with sharp drops in both scenarios.
+
+Western regions are less sensitive due to irrigation buffering climate extremes, while southern areas face greater heat damage, leading to sharper declines. Climate mitigation efforts (SSP2-4.5) help reduce severe losses. This assumes no significant land-use changes. In reality, farmers may adapt, leading to more crop production in the north and less in the south, potentially mitigating losses over time.
+
+## References
+
+Schlenker, Wolfram, and Michael J. Roberts. "Nonlinear effects of weather on corn yields." *Review of agricultural economics* 28, no. 3 (2006): 391-398. [link](https://www.jstor.org/stable/pdf/3877185.pdf?casa_token=1Q--q-PURO0AAAAA:RvzW2R3qCUBOs4-IfWvlCFb-afd9G8ygKbcn2ffuQLaJdq1Mt-KJaKmcpKGEkr8m96mfLh3UHHbpl0-w2wq3RuFnkZN8xkZeseF_6sWseqSgeH9L6PY)
+
+Schlenker, Wolfram, and Michael J. Roberts. "Nonlinear temperature effects indicate severe damages to US crop yields under climate change." *Proceedings of the National Academy of sciences* 106, no. 37 (2009): 15594-15598. [link](https://www.pnas.org/doi/pdf/10.1073/pnas.0906865106)
