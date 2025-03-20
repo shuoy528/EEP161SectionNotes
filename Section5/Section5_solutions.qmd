@@ -1,0 +1,343 @@
+---
+title: "Section 5: Quantifying the Impact of Weather on Crop Yields (Continued)"
+author: "Shuo Yu"
+format: pdf
+date: "2/19/2024"
+---
+
+```{r}
+#| warning: false
+
+rm(list = ls())
+
+# Install package for fixed effect regressions
+# install.packages("fixest")
+
+library(tidyverse)
+library(fixest)
+
+setwd("C:/Users/shuoy/Dropbox/161/Sections/Section5")
+```
+
+## Data
+
+```{r}
+weather <- read.csv("Weather.csv", header = TRUE)
+corn_yield <- read.csv("CornYields.csv", header = TRUE)
+soy_yield <- read.csv("SoyYields.csv", header = TRUE)
+```
+
+## Data Cleaning
+
+```{r}
+# Weather Data
+filtered_weather <- weather %>%
+  select(GEOID, NAME, Year, edd, gdd, ppt, tavg, tmax, east_dummy)
+
+# Corn Yield Data
+filtered_corn_yield <- corn_yield %>%
+  select(Year, County.ANSI, State.ANSI, Ag.District, Value) %>%  # Select relevant columns
+  rename(CornYield = Value) %>%  # Rename 'Value' to 'CornYield'
+  mutate(
+      GEOID = State.ANSI*1000+County.ANSI # Create GEOID that is 5 digits
+    ) %>%
+  select(-State.ANSI, -County.ANSI)  # Drop State.ANSI and County.ANSI
+
+# Soybean Yield Data
+filtered_soy_yield <- soy_yield %>%
+  select(Year, County.ANSI, State.ANSI, Ag.District, Value) %>%  # Select relevant columns
+  rename(SoyYield = Value) %>%  # Rename 'Value' to 'SoyYield'
+  mutate(
+      GEOID = State.ANSI*1000+County.ANSI # Create GEOID that is 5 digits
+    ) %>%
+  select(-State.ANSI, -County.ANSI)  # Drop State.ANSI and County.ANSI
+
+# Merge Datasets
+full_data <- filtered_corn_yield %>%
+  left_join(filtered_soy_yield, by = c("GEOID", "Year")) %>%
+  left_join(filtered_weather, by = c("GEOID", "Year")) %>%
+  mutate(Ag.District = coalesce(Ag.District.x, Ag.District.y)) %>%  # Fill missing with non-missing
+  select(-Ag.District.x, -Ag.District.y)  %>%  # Drop original columns
+  filter(!is.na(gdd) & !is.na(edd) & !is.na(ppt))
+
+full_data$Year <- full_data$Year - 1980
+
+full_data$GEOID <- as.factor(full_data$GEOID)
+full_data$Year <- as.numeric(full_data$Year)
+```
+
+Let's use corn yields as an example. You can follow similar steps and adjust the code to obtain results for soybeans.
+
+```{r}
+# Drops rows with missing values (na.omit()).
+corn_data <- full_data %>% 
+  select(-SoyYield) %>%
+  na.omit()
+
+# Filters counties that have at least 21 observations to ensure major corn groing counties with enough data points.
+corn_data <- corn_data %>% 
+  group_by(GEOID) %>% 
+  filter(n() > 20) %>% 
+  ungroup()
+
+summary(corn_data)
+```
+
+## Data Visualization
+
+### Scatter Plots
+
+```{r}
+# Create scatter plot of corn yield vs. average temperature
+scatterplot1 <- corn_data %>%
+  filter(east_dummy==1) %>%
+  ggplot(aes(x = tavg, y = CornYield)) +
+  geom_point(color = "blue", alpha = 0.1, size = 0.7) +  # Scatter points
+  geom_smooth(method = "lm", color = "red", 
+              se = TRUE, formula = y ~ x) +  # Linear fit
+  geom_smooth(method = "lm", color = "green", 
+              se = TRUE, formula = y ~ poly(x, 2)) +  # Quadratic fit
+  labs(title = "Scatter Plot of Corn Yield vs. Average Temperature",
+       x = "Average Temperature (°C)", 
+       y = "Corn Yield (bu/acre)") +
+  theme_minimal()
+
+scatterplot1
+```
+
+```{r}
+# Create scatter plot of corn yield vs. precipitation
+scatterplot2 <- corn_data %>%
+  ggplot(aes(x = ppt, y = CornYield)) +
+  geom_point(color = "blue", alpha = 0.1, size = 0.7) +  # Scatter points
+  geom_smooth(method = "lm", color = "red", 
+              se = FALSE, formula = y ~ x) +  # Linear fit
+  geom_smooth(method = "lm", color = "green", 
+              se = FALSE, formula = y ~ poly(x, 2)) +  # Quadratic fit
+  labs(title = "Scatter Plot of Corn Yield vs. Cummulative Precipitation",
+       x = "Precipitation (mm)", 
+       y = "Corn Yield (bu/acre)") +
+  theme_minimal()
+
+scatterplot2
+```
+
+## Multiple Regression with a Nonlinear Functional Form
+
+This section introduces a quadratic term for precipitation to capture the inverted U-shaped relationship with crop yield. Additionally, we construct Growing Degree Days (GDD) and Extreme Degree Days (EDD) to account for the nonlinear effects of temperature on yield.
+
+We model the relationship between corn yield and key weather variables as follows:
+
+$$
+CornYield_{it} = \beta_{0} + \beta_{1} GDD_{it} + \beta_{2} EDD_{it} + \beta_{3} Precipitation_{it} + \beta_{4} Precipitation^{2}_{it} + \beta_{5}Year_{it}  + \varepsilon_{it}
+$$
+
+where:
+
+-   Outcome variable: $CornYield_{t}$ – Corn yield in year t
+
+-   Independent variables:
+
+    -   $GDD_{t}$ Growing degree days during the growing season (April to September)
+
+    -   $EDD_{t}$ Extreme degree days during the growing season
+
+    -   $Precipitation_{t}$ – Cumulative precipitation during the growing season
+
+    -   $Year_{t}$ - Linear time trend
+
+-   $\varepsilon_{t}$ represents the error term, capturing unobserved factors affecting corn yield.
+
+### Adding a Squared Term of Precipitation
+
+Diminishing returns and the inverted U-shape relationship:
+
+-   Moderate precipitation is essential for crop growth, leading to higher yields.
+
+-   However, excessive rainfall can lead to water logging, nutrient leaching, or disease outbreaks, which negatively impact yields.
+
+-   By including both precipitation (linear term) and precipitation squared (quadratic term), the model can account for an inverted U-shaped relationship, where yield increases with precipitation up to a certain point and then starts to decline.
+
+### Using Growing Degree Days (GDD) and Extreme Degree Days (EDD)
+
+-   Crops have optimal temperature ranges for photosynthesis and growth. Extreme heat (\>30°C) damages plant cells, reduces enzyme activity, and disrupts photosynthesis (e.g. Schlenker & Roberts, 2009).
+
+-   When high temperatures are combined with low precipitation, the negative impact on crop yields is significantly amplified. This interaction leads to severe water stress, heat stress, and nutrient deficiencies, which reduce plant productivity. High temperatures accelerate evapotranspiration, meaning crops lose water faster than they can absorb it from the soil.
+
+-   **GDD** measure heat accumulation used to predict plant development stages. GDD between 8 and 30°C is defined as $$ GDD = \sum_{t=1}^{T}\max(\min(T_{avg}, 30) - 8, 0)$$
+
+-   **EDD** measure heat stress on crops when temperatures exceed a critical threshold. EDD above 30°C is defined as $$EDD  = \sum_{t=1}^{T}\max(T_{max} - 30, 0)$$
+
+```{r}
+# Run multiple linear regression
+model <- lm(CornYield ~ gdd + edd + ppt + I(ppt^2) + Year, data = corn_data)
+
+# Display summary of the model
+options(scipen = 999)
+summary(model)
+```
+
+**Question**:
+
+-   What are the key takeaways? Were any estimates unexpected?
+
+-   Is the model correctly specified? What potential issues might arise with this estimation equation?
+
+Some counties have naturally better soil or farming techniques, those county-specific factors might bias our results. Solution? Use county fixed effects, which account for each county's unique characteristics that don’t change over time (like soil quality or historical farming practices). This way, our model focuses only on how changes in weather impact yield.
+
+## Fixed Effects Model
+
+Fixed effects in regression help control for time-invariant differences between groups, allowing us to isolate the impact of changes in other factors on the outcome. Conceptually, this approach is similar to subtracting each county’s average yield from its yearly yields and adjusting weather variables—such as EDD, GDD, and precipitation—by their county-level means. By doing so, we eliminate the influence of permanent characteristics (e.g., soil quality, historical farming practices) and focus on how within-county variations in weather conditions affect crop yields over time.
+
+$$
+CornYield_{it} = \beta_{0} + \beta_{1} GDD_{it} + \beta_{2} EDD_{it} + \beta_{3} PPT_{it} + \beta_{4} PPT^{2}_{it} + \alpha_{i} + \delta_{t} + \gamma_{i}Year_{it}  + \varepsilon_{it}
+$$
+
+-   **County Fixed Effects ($\alpha_{i}$):** Removes the impact of factors that differ across counties but stay the same over time (e.g., soil quality, local policies).
+
+-   **Year Fixed Effects ($\delta_{t}$):** Controls for yearly shocks affecting all counties (e.g., nationwide economic conditions, federal policies).
+
+-   **County-Specific Time Trends ($\gamma_{i}$):** Allows each county to have its own trend over time (e.g., gradual technology adoption in some regions).
+
+```{r}
+fe_model <- feols(CornYield ~ gdd + edd + ppt + I(ppt^2) | 
+                  Year + GEOID[Year], 
+                  data = corn_data)
+
+summary(fe_model)
+```
+
+To understand how fixed effects work:
+
+- Run a fixed effects regression for corn yield, EDD, and precipitation, removing county (GEOID) and year (Year) effects, and the county-specific time trend.
+
+- Extract the residuals, which capture the variation in yield and precipitation not explained by fixed effects.
+
+- Create a scatter plot of the residuals, adding a linear trend line to visualize their relationship.
+
+```{r}
+# Regress Yield and Precipitation separately on fixed effects
+yield_fe <- feols(CornYield ~ 1 | GEOID + GEOID[Year], data = corn_data)
+edd_fe <- feols(edd ~ 1 | GEOID + GEOID[Year], data = corn_data)
+precip_fe <- feols(ppt ~ 1 | GEOID + GEOID[Year], data = corn_data)
+
+# Extract residuals
+corn_data <- corn_data %>%
+  mutate(resid_yield = resid(yield_fe),
+         resid_edd = resid(edd_fe),
+         resid_ppt = resid(precip_fe))
+
+# Scatter plot of residuals
+scatterplot3 <- corn_data %>%
+  ggplot(aes(x = resid_edd, y = resid_yield)) +
+  geom_point(color = "blue", alpha = 0.1, size = 0.7) +  # Scatter points
+  geom_smooth(method = "lm", color = "red", 
+              se = FALSE, formula = y ~ x) +  # Linear fit
+  geom_smooth(method = "lm", color = "green", 
+              se = FALSE, formula = y ~ poly(x, 2)) +  # Quadratic fit
+  labs(title = "Scatter Plot of Residualized Yield vs. EDD",
+       x = "EDD", 
+       y = "Corn Yield (bu/acre)") +
+  theme_minimal()
+
+scatterplot3
+
+# Scatter plot of residuals
+scatterplot4 <- corn_data %>%
+  ggplot(aes(x = resid_ppt, y = resid_yield)) +
+  geom_point(color = "blue", alpha = 0.1, size = 0.7) +  # Scatter points
+  geom_smooth(method = "lm", color = "red", 
+              se = FALSE, formula = y ~ x) +  # Linear fit
+  geom_smooth(method = "lm", color = "green", 
+              se = FALSE, formula = y ~ poly(x, 2)) +  # Quadratic fit
+  labs(title = "Scatter Plot of Residualized Yield vs. Precipitation",
+       x = "Precipitation (mm)", 
+       y = "Corn Yield (bu/acre)") +
+  theme_minimal()
+
+scatterplot4
+```
+
+## Spatial Heterogeneity
+
+Restricting to counties east of the 100th meridian ensures a more homogeneous sample, reducing noise caused by irrigation, land use, and climate variability.
+
+- Climate and agricultural practices: East of the 100th meridian has sufficient rainfall for rain-fed agriculture, while the west relies on irrigation.
+
+- Crop differences: Eastern counties grow more corn and soybeans; western counties focus on range land and drought-resistant crops.
+
+- Historical settlement: Denser populations and smaller farms in the east, larger, irrigated farms in the west.
+
+- Policy and programs: Many federal agricultural policies (e.g., crop insurance, EQIP) target rain-fed regions differently from irrigated areas.
+
+### Map of Counties Included in the Regression East of the 100th Meridian
+
+```{r}
+#| echo: FALSE
+#| warning: FALSE
+#| message: FALSE
+
+# Load necessary libraries
+library(sf)
+library(tigris)
+
+# Load county boundaries for the lower 48 states
+counties <- tigris::counties(cb = TRUE, class = "sf") %>%
+  filter(!(STATEFP %in% c("02", "15", "72", "78", "66", "69", "60")))  # Exclude AK, HI, PR, VI, GU, MP, AS
+
+# Select necessary columns from corn_data (GEOID, east_dummy)
+corn_data_filtered <- corn_data %>%
+  select(GEOID, east_dummy) %>%
+  distinct()
+
+# Merge county boundaries with east_dummy information
+counties <- counties %>%
+  left_join(corn_data_filtered, by = "GEOID") %>%
+  mutate(is_east = case_when(
+    east_dummy == 1 ~ "Highlighted",
+    east_dummy == 0 ~ "Non-Highlighted",
+    TRUE ~ "Unknown"  # Assign a category for NA values
+  ))
+
+# Plot: Black boundaries for all counties, color by east_dummy
+ggplot(data = counties) +
+  geom_sf(aes(fill = is_east), color = "black", size = 0.1) +  # Black boundaries for all counties
+  scale_fill_manual(values = c("Highlighted" = "red", "Non-Highlighted" = "blue", "Unknown" = "white"), guide = FALSE) +  # Ensure all categories are mapped
+  theme_minimal() +
+  ggtitle("Counties East of the 100th Meridian") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+### East of 100th Meridian Line
+
+```{r}
+fe_model <- feols(CornYield ~ gdd + edd + ppt + I(ppt^2) | 
+                  Year + GEOID[Year], 
+                  data = corn_data[corn_data$east_dummy==1, ])
+
+summary(fe_model)
+```
+### West of 100th Meridian Line
+
+```{r}
+fe_model <- feols(CornYield ~ gdd + edd + ppt + I(ppt^2) | 
+                  Year + GEOID[Year], 
+                  data = corn_data[corn_data$east_dummy==0, ])
+
+summary(fe_model)
+```
+
+**Questions** :
+
+- How do the effects of EDD differ between east and west?
+
+EDD has a stronger negative impact in the east (−0.152, p < 0.0001) than in the west (−0.090, p < 0.0001), indicating that extreme heat is more damaging in the east, likely due to less reliance on irrigation.
+
+- How does precipitation and its squared term influence the outcome in each region?
+
+This implies that water availability is a key factor for crops in the east, while irrigation buffers its effect in the west.
+
+## References
+
+Schlenker, Wolfram, and Michael J. Roberts. "Nonlinear effects of weather on corn yields." *Review of agricultural economics* 28, no. 3 (2006): 391-398. [link](https://www.jstor.org/stable/pdf/3877185.pdf?casa_token=1Q--q-PURO0AAAAA:RvzW2R3qCUBOs4-IfWvlCFb-afd9G8ygKbcn2ffuQLaJdq1Mt-KJaKmcpKGEkr8m96mfLh3UHHbpl0-w2wq3RuFnkZN8xkZeseF_6sWseqSgeH9L6PY)
+
+Schlenker, Wolfram, and Michael J. Roberts. "Nonlinear temperature effects indicate severe damages to US crop yields under climate change." *Proceedings of the National Academy of sciences* 106, no. 37 (2009): 15594-15598. [link](https://www.pnas.org/doi/pdf/10.1073/pnas.0906865106)
