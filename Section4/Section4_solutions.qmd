@@ -1,0 +1,194 @@
+---
+title: "Section 4: Quantifying the Impact of Weather on Crop Yields"
+author: "Shuo Yu"
+format: pdf
+date: "2/12/2024"
+---
+
+Quantifying the yield-weather relationship is crucial for predicting crop responses, assessing climate change impacts, managing agricultural risks, informing policies, guiding technological innovations, and improving yield forecasts. This helps ensure food security and resilience in agriculture.
+
+## Data Sources
+
+-   Crop Yields: [USDA NASS Quick Stats](https://quickstats.nass.usda.gov/)
+
+    The USDA National Agricultural Statistics Service (NASS) Quick Stats is an online database providing extensive agricultural data for the United States. It allows users to query, download, and analyze annual, seasonal, and survey-based statistics on crop production, livestock, farm economics, and environmental factors.
+
+-   Weather Data: [PRISM Climate Data](https://www.prism.oregonstate.edu/)
+
+    The Parameter-elevation Regressions on Independent Slopes Model (PRISM) is a high-resolution climate dataset developed by the PRISM Climate Group at Oregon State University. It integrates point station data, elevation, and terrain influences to improve accuracy, particularly in complex geographic regions. PRISM provides daily, monthly, and long-term climate datasets for key weather variables such as precipitation, temperature (minimum, maximum, mean), and dew point. It is widely used in agricultural research, climate impact studies, hydrology, and environmental policy analysis due to its fine spatial resolution (e.g., 4 km or finer for some datasets).
+
+```{r}
+#| warning: false
+library(tidyverse)
+
+setwd("C:/Dropbox/Teaching/ENVECON161/161/Sections/Section4")
+
+weather <- read.csv("Weather.csv", header = TRUE)
+str(weather)
+
+corn_yield <- read.csv("CornYields.csv", header = TRUE)
+str(corn_yield)
+
+soy_yield <- read.csv("SoyYields.csv", header = TRUE)
+str(soy_yield)
+```
+
+## Data Cleaning
+
+To prepare the data frame for visualization and regression analysis, we need to clean and structure the data into a tidy format that ensures consistency and usability. The key steps include:
+
+-   Understanding the Data: What is the unit of observation in the data frame? What key variables are needed for analysis? For this section, we will focus on a single county in Iowa over time to establish a baseline understanding of the effect of weather on crop yields. As we progress, we will expand the analysis to include additional regions and examine other sources of variation in the dataset.
+
+-   Filtering the Data: Select relevant variables and filter out observations relevant to the specific study area.
+
+-   Merging Datasets: Combine multiple datasets based on year and region to ensure alignment.
+
+This cleaned dataset will serve as the foundation for subsequent data visualization and regression modeling.
+
+```{r}
+# Weather Data
+filtered_weather <- weather %>%
+  select(GEOID, NAME, Year, edd, gdd, ppt, tavg, tmax) %>% # Select relevant columns
+  filter(GEOID == 19023) # Filter for Iowa and Butler County (GEOID = 19023)
+
+# Corn Yield Data
+filtered_corn_yield <- corn_yield %>%
+  select(Year, County.ANSI, State.ANSI, Value) %>%  # Select relevant columns
+  rename(CornYield = Value) %>%  # Rename 'Value' to 'CornYield'
+  filter(State.ANSI == 19, County.ANSI == 23) %>%  # Filter for Iowa and Butler County
+  mutate(
+      GEOID = State.ANSI*1000+County.ANSI # Create GEOID that is 5 digits
+    ) %>%
+  select(-State.ANSI, -County.ANSI)  # Drop State.ANSI and County.ANSI
+
+# Soybean Yield Data
+filtered_soy_yield <- soy_yield %>%
+  select(Year, County.ANSI, State.ANSI, Value) %>%  # Select relevant columns
+  rename(SoyYield = Value) %>%  # Rename 'Value' to 'SoyYield'
+  filter(State.ANSI == 19, County.ANSI == 23) %>%  # Filter for Iowa (State.ANSI = 19) and Butler County (County.ANSI = 23)
+  mutate(
+      GEOID = State.ANSI*1000+County.ANSI # Create GEOID that is 5 digits
+    ) %>%
+  select(-State.ANSI, -County.ANSI)  # Drop State.ANSI and County.ANSI
+
+# Merge Datasets
+full_data <- filtered_corn_yield %>%
+  left_join(filtered_soy_yield, by = c("GEOID", "Year")) %>%
+  left_join(filtered_weather, by = c("GEOID", "Year")) %>%
+  na.omit()
+
+summary(full_data)
+```
+
+## Data Visualization
+
+### Distribution of Key Variables
+
+```{r}
+# Create density plot for average and max temperature
+full_data %>%
+  ggplot() +
+  geom_density(aes(x = tavg, fill = "tavg"), alpha = 0.5, color = "blue") + 
+  geom_density(aes(x = tmax, fill = "tmax"), alpha = 0.5, color = "red") +
+  scale_fill_manual(values = c("tavg" = "blue", "tmax" = "red")) +  # Custom colors
+  labs(title = "Distribution of tavg and tmax",
+       x = "Temperature (°C)", 
+       y = "Density", 
+       fill = "Variable") +
+  theme_minimal()
+```
+
+```{r}
+# Create density plot for corn yields and soybean yields
+full_data %>%
+  ggplot() +
+  geom_density(aes(x = CornYield, fill = "CornYield"), 
+               alpha = 0.5, color = "blue") + 
+  geom_density(aes(x = SoyYield, fill = "SoyYield"), 
+               alpha = 0.5, color = "red") +
+  scale_fill_manual(values = c("CornYield" = "blue", "SoyYield" = "red")) +  # Custom colors
+  labs(title = "Distribution of CornYield and SoyYield",
+       x = "Yield (bu/acre)", y = "Density", fill = "Variable") +
+  theme_minimal()
+```
+
+### Scatter Plots
+
+```{r}
+# Create scatter plot of corn yield vs. average temperature
+full_data %>%
+  ggplot(aes(x = tavg, y = CornYield)) +
+  geom_point(color = "blue") +  # Scatter points
+  geom_smooth(method = "lm", color = "red", 
+              se = FALSE, formula = y ~ x) +  # Linear fit
+  geom_smooth(method = "lm", color = "green", 
+              se = FALSE, formula = y ~ poly(x, 2)) +  # Quadratic fit
+  labs(title = "Scatter Plot of Corn Yield vs. Average Temperature",
+       x = "Average Temperature (°C)", 
+       y = "Corn Yield (bu/acre)") +
+  theme_minimal()
+```
+
+```{r}
+# Create scatter plot of corn yield vs. precipitation
+full_data %>%
+  ggplot(aes(x = ppt, y = CornYield)) +
+  geom_point(color = "blue") +  # Scatter points
+  geom_smooth(method = "lm", color = "red", 
+              se = FALSE, formula = y ~ x) +  # Linear fit
+  geom_smooth(method = "lm", color = "green", 
+              se = FALSE, formula = y ~ poly(x, 2)) +  # Quadratic fit
+  labs(title = "Scatter Plot of Corn Yield vs. Cummulative Precipitation",
+       x = "Precipitation (mm)", 
+       y = "Corn Yield (bu/acre)") +
+  theme_minimal()
+```
+
+## Multiple Variable Linear Regression Model
+
+We model the relationship between corn yield and key weather variables as follows:
+
+$$
+CornYield_{t} = \beta_{0} + \beta_{1} AvgTemperature_{t} + \beta_{2} Precipitation_{t} + \beta_{3}Year_{t}  + \varepsilon_{t}
+$$
+
+where:
+
+-   Outcome variable: $CornYield_{t}$ – Corn yield in year t
+
+-   Independent variables:
+
+    -   $AvgTemperature_{t}$ Average temperature during the growing season (April to September
+
+    -   $Precipitation_{t}$ – Cummulative precipitation during the growing season (April to September)
+
+    -   $Year_{t}$ - Linear time trend
+
+-   $\varepsilon_{t}$ represents the error term, capturing unobserved factors affecting corn yield.
+
+This model allows us to estimate the impact of temperature and precipitation on corn yield, providing insights into how climate conditions influence agricultural productivity.
+
+```{r}
+# Run multiple linear regression
+model <- lm(CornYield ~ tavg + ppt + Year, data = full_data)
+
+# Display summary of the model
+options(scipen = 999)
+summary(model)
+```
+
+**Question**: What are the main takeaways?
+
+-   Corn yield has a significant upward trend over time (Year coefficient = 2.395, p \< 0.001). Each additional year is associated with a 2.395 bushel/acre increase in corn yield. This could reflect technological advancements or improved farming practices.
+
+-   Temperature (`tavg`) and precipitation (`ppt`) are not statistically significant predictors of yield (p_tavg = 0.835, p_ppt = 0.178).
+
+-   Model explains 71.4% of yield variation (`R² = 0.7137`), but residual standard error (19.2 bu/acre) suggests other unobserved factors. 
+
+- F-statistic = 35.9, p-value = 2.642e-11 → The model is highly significant, meaning at least one predictor is statistically relevant in explaining corn yield.
+
+## References
+
+Schlenker, Wolfram, and Michael J. Roberts. "Nonlinear effects of weather on corn yields." *Review of agricultural economics* 28, no. 3 (2006): 391-398. [link](https://www.jstor.org/stable/pdf/3877185.pdf?casa_token=1Q--q-PURO0AAAAA:RvzW2R3qCUBOs4-IfWvlCFb-afd9G8ygKbcn2ffuQLaJdq1Mt-KJaKmcpKGEkr8m96mfLh3UHHbpl0-w2wq3RuFnkZN8xkZeseF_6sWseqSgeH9L6PY)
+
+Schlenker, Wolfram, and Michael J. Roberts. "Nonlinear temperature effects indicate severe damages to US crop yields under climate change." *Proceedings of the National Academy of sciences* 106, no. 37 (2009): 15594-15598. [link](https://www.pnas.org/doi/pdf/10.1073/pnas.0906865106)

@@ -1,0 +1,128 @@
+---
+title: "Section 4: Quantifying the Impact of Weather on Crop Yields"
+author: "Shuo Yu"
+format: html
+date: "2/12/2024"
+---
+
+Quantifying the yield-weather relationship is crucial for predicting crop responses, assessing climate change impacts, managing agricultural risks, informing policies, guiding technological innovations, and improving yield forecasts. This helps ensure food security and resilience in agriculture.
+
+## Data Sources
+
+-   Crop Yields: [USDA NASS Quick Stats](https://quickstats.nass.usda.gov/)
+
+    The USDA National Agricultural Statistics Service (NASS) Quick Stats is an online database providing extensive agricultural data for the United States. It allows users to query, download, and analyze annual, seasonal, and survey-based statistics on crop production, livestock, farm economics, and environmental factors.
+
+-   Weather Data: [PRISM Climate Data](https://www.prism.oregonstate.edu/)
+
+    The Parameter-elevation Regressions on Independent Slopes Model (PRISM) is a high-resolution climate dataset developed by the PRISM Climate Group at Oregon State University. It integrates point station data, elevation, and terrain influences to improve accuracy, particularly in complex geographic regions. PRISM provides daily, monthly, and long-term climate datasets for key weather variables such as precipitation, temperature (minimum, maximum, mean), and dew point. It is widely used in agricultural research, climate impact studies, hydrology, and environmental policy analysis due to its fine spatial resolution (e.g., 4 km or finer for some datasets).
+
+```{r}
+#| warning: false
+library(tidyverse)
+
+setwd("C:/Users/shuoy/Dropbox/161/Sections/Section4")
+
+# Read in and check data
+```
+
+## Data Cleaning
+
+To prepare the data frame for visualization and regression analysis, we need to clean and structure the data into a tidy format that ensures consistency and usability. The key steps include:
+
+-   Understanding the Data: What is the unit of observation in the data frame? What key variables are needed for analysis? For this section, we will focus on a single county in Iowa over time to establish a baseline understanding of the effect of weather on crop yields. As we progress, we will expand the analysis to include additional regions and examine other sources of variation in the dataset.
+
+-   Filtering the Data: Select relevant variables and filter out observations relevant to the specific study area.
+
+-   Merging Datasets: Combine multiple datasets based on year and region to ensure alignment.
+
+This cleaned dataset will serve as the foundation for subsequent data visualization and regression modeling.
+
+```{r}
+# Weather Data
+# Select relevant columns
+# Filter for Iowa and Butler County (GEOID = 19023)
+
+# Corn Yield Data
+# Select relevant columns
+# Rename 'Value' to 'CornYield'
+# Filter for Iowa and Butler County
+# Create GEOID that is 5 digits
+# Drop State.ANSI and County.ANSI
+
+# Soybean Yield Data
+# Select relevant columns
+# Rename 'Value' to 'SoyYield'
+# Filter for Iowa (State.ANSI = 19) and Butler County (County.ANSI = 23)
+# Create GEOID that is 5 digits
+# Drop State.ANSI and County.ANSI
+
+# Merge Datasets
+
+# Data Summary
+```
+
+## Data Visualization
+
+### Distribution of Key Variables
+
+```{r}
+# Create density plot for average and max temperature
+
+```
+
+```{r}
+# Create density plot for corn yields and soybean yields
+
+```
+
+### Scatter Plots
+
+```{r}
+# Create scatter plot of corn yield vs. average temperature
+
+```
+
+```{r}
+# Create scatter plot of corn yield vs. precipitation
+
+```
+
+## Multiple Variable Linear Regression Model
+
+We model the relationship between corn yield and key weather variables as follows:
+
+$$
+CornYield_{t} = \beta_{0} + \beta_{1} AvgTemperature_{t} + \beta_{2} Precipitation_{t} + \beta_{3}Year_{t}  + \varepsilon_{t}
+$$
+
+where:
+
+-   Outcome variable: $CornYield_{t}$ – Corn yield in year t
+
+-   Independent variables:
+
+    -   $AvgTemperature_{t}$ Average temperature during the growing season (April to September
+
+    -   $Precipitation_{t}$ – Cummulative precipitation during the growing season (April to September)
+
+    -   $Year_{t}$ - Linear time trend
+
+-   $\varepsilon_{t}$ represents the error term, capturing unobserved factors affecting corn yield.
+
+This model allows us to estimate the impact of temperature and precipitation on corn yield, providing insights into how climate conditions influence agricultural productivity.
+
+```{r}
+# Run multiple linear regression
+
+# Display summary of the model
+
+```
+
+**Question**: What are the main takeaways?
+
+## References
+
+Schlenker, Wolfram, and Michael J. Roberts. "Nonlinear effects of weather on corn yields." *Review of agricultural economics* 28, no. 3 (2006): 391-398. [link](https://www.jstor.org/stable/pdf/3877185.pdf?casa_token=1Q--q-PURO0AAAAA:RvzW2R3qCUBOs4-IfWvlCFb-afd9G8ygKbcn2ffuQLaJdq1Mt-KJaKmcpKGEkr8m96mfLh3UHHbpl0-w2wq3RuFnkZN8xkZeseF_6sWseqSgeH9L6PY)
+
+Schlenker, Wolfram, and Michael J. Roberts. "Nonlinear temperature effects indicate severe damages to US crop yields under climate change." *Proceedings of the National Academy of sciences* 106, no. 37 (2009): 15594-15598. [link](https://www.pnas.org/doi/pdf/10.1073/pnas.0906865106)
