@@ -1,0 +1,268 @@
+---
+title: "Section 3: Data Visualization and Regression in R"
+author: "Shuo Yu"
+format: html
+date: "2/5/2024"
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>. When you click the **Render** button a document will be generated that includes both content and the output of embedded code.
+
+```{r}
+#| include=FALSE
+# install.packages("rmarkdown")
+setwd("C:/Users/shuoy/Dropbox/161/Sections/Section3")
+```
+
+## Data Visualization
+
+### Principles of Data Visualization
+
+Visualization is meant to convey information. To accurately and efficiently communicate the information hidden within the data, we should also be aware of the common pitfalls of data visualization.
+
+-   Does the plot contain too much or too little data?
+
+-   Am I using an effective geometry and clearly showing the data?
+
+-   What do the colors mean? Does the chosen color contrast accurately convey the differences?
+
+-   Does the plot include sufficient text descriptions (e.g. labels, legend, title, and captions)?
+
+-   Does the plot has an appropriate size and scale?
+
+-   Does the plot include a common scale for group comparison?
+
+The answers to these questions vary depending on the data we have and the message we want to convey through the plot.
+
+![Visualizations illustrating different geometries, including histograms (A, B), scatterplots (C, D), boxplots (E), heatmaps (F), and small multiples (G). Adapted from Stephen R. Midway (2020) (https://doi.org/10.1016/j.patter.2020.100141).](1-s2.0-S2666389920301896-gr1.jpg){width="631"}
+
+### Plotting in R
+
+The most common set of tools for creating plots in R is `ggplot2`, which we will use throughout this section. `ggplot2` uses a conceptual framework based on the grammar of graphics. This allows you to ‘speak’ a graph from composable elements, instead of being limited to a predefined set of charts. ggplot2 needs at least the following three to produce a chart: data, a mapping, and a layer. `ggplot2` works in layers, similar to software such as Photoshop. We create a base layer, and then stack layers on top of that base layer. New layers are added to a plot using the addition `+` symbol. Lastly, plots can be further customized using a host of `theme_` functions.
+
+#### Ultimate Goal
+
+Our ultimate goal is to replicate the figures from the [ARE Update article](https://s.giannini.ucop.edu/uploads/pub/2021/02/18/v24n3_2.pdf), demonstrating that while COVID-19 relief programs have maintained high U.S. farm incomes, they have disproportionately disadvantaged California producers.
+
+Load in packages and read in data.
+
+```{r}
+#| warning: false
+library(tidyverse)
+
+df <- read.csv("CFAPPayments.csv", header = TRUE)
+
+head(df)
+```
+
+#### Data
+
+With ggplot2, you begin a plot with the function `ggplot()`, defining a plot object that you then add **layers** to. The first argument of `ggplot()` is the dataset to use in the graph. The system works best if the data is provided in a tidy format.
+
+```{r}
+ggplot(data=df)
+```
+
+This creates an empty graph which stores the data to be used later by other parts of the plotting system.
+
+#### Mapping
+
+The mapping of a plot provides a set of instructions on how data elements are connected to the aesthetic attributes of geometric objects. It serves as a 'dictionary' to translate tidy data into the graphics system. This mapping is usually defined using the `aes()` function, which pairs graphical attributes with specific parts of the data. For example, to map the percentage of income from cattle, milk, corn, or soybean production to the x-axis and the percentage of CFAP payments relative to gross income to the y-axis, we can use the following approach:
+
+```{r}
+ggplot(
+  data = df, 
+  mapping = aes(x = cows+cs, y = cfap)
+  )
+```
+
+#### Layers
+
+The heart of any graphic is the layers. They take the mapped data and display it in something humans can understand as a representation of the data. Every layer consists of three important parts:
+
+-   The geometry that determines how data are displayed, such as points, lines, or rectangles.
+
+-   The statistical transformation that may compute new variables from the data and affect what of the data is displayed.
+
+-   The position adjustment that primarily determines where a piece of data is being displayed.
+
+A layer can be constructed using the `geom_*()` and `stat_*()` functions. These functions often determine one of the three parts of a layer, while the other two can still be specified. Here is how we can display the `cows+cs` and `cfap` columns of the dataset as points.
+
+```{r}
+ggplot(
+  data = df, 
+  mapping = aes(x = cows+cs, y = cfap)
+  ) +
+  geom_point()
+```
+
+Scatterplots are effective for visualizing the relationship between two numerical variables. Incorporating color and size can enhance the plot by conveying additional information.
+
+```{r}
+ggplot(
+  data = df, 
+  mapping = aes(x = cows+cs, y = cfap)
+  ) +
+  geom_point(aes(color = cs/(cows+cs), size = Gross.cash.income/1000000))
+```
+
+Here are a few geometries:
+
+-   Univariate
+
+    -   density - geom_density()
+
+    -   histogram - geom_histogram()
+
+    -   barchart - geom_bar()
+
+-   Bivariate
+
+    -   points - geom_point()
+
+    -   lines - geom_line()
+
+    -   smoothers - geom_smooth()
+
+    -   text - geom_test()
+
+List of geometries and stats: <https://ggplot2.tidyverse.org/reference/#geoms>.
+
+We can add more layers on top of our point geom. For example, we can draw the line of best fit based on a linear model with `method = "lm"`. We can also highlight the points that represent CA and US average.
+
+```{r}
+ggplot(
+  data = df, 
+  mapping = aes(x = cows+cs, y = cfap)
+  ) +
+  geom_point(aes(color = cs/(cows+cs), 
+                 size = Gross.cash.income/1000000)) +
+  geom_smooth(method = "lm") + # Adds a linear regression line
+  geom_point(aes(x=cows_CA+cs_CA, y=cfap_CA, 
+                 size=Gross.cash.income/1000000), 
+             color="red"
+             ) +
+  geom_text(x=18, y=3.1, label="California", color="red") +
+  geom_text(x=39, y=5.9, label="US Average", color="red")
+```
+
+#### Other Elements
+
+And finally, we can improve the **labels** of our plot using the `labs()` function in a new layer. Some of the arguments to `labs()` might be self explanatory: `title` adds a title and `subtitle` adds a subtitle to the plot. Other arguments match the aesthetic mappings, `x` is the x-axis label, `y` is the y-axis label, and `color` and `size` define the label for the legend.
+
+**Scales** are important for translating what is shown on the graph back to an understanding of the data. The scales typically form pairs with aesthetic attributes of the plots, and are represented in plots by guides, like axes or legends. Scales are responsible for updating the limits of a plot, setting the breaks, formatting the labels, and possibly applying a transformation. To use scales, one can use one of the scale functions that are patterned as `scale_{aesthetic}_{type}()` functions, where `{aesthetic}` is one of the pairings made in the mapping part of a plot.
+
+The **theme** system controls almost any visuals of the plot that are not controlled by the data and is therefore important for the look and feel of the plot. You can use the theme for customizations ranging from changing the location of the legends to setting the background color of the plot.
+
+Once you’ve made a plot, you might want to get it out of R by saving it as an image that you can use elsewhere. That’s the job of `ggsave()`, which will **save** the plot most recently created to disk.
+
+```{r}
+df %>% 
+  ggplot(aes(x = cows+cs, y = cfap)) +
+  geom_point(aes(color = cs/(cows+cs), 
+                 size = Gross.cash.income/1000000)) +
+  scale_colour_viridis_c() +
+  geom_smooth(method = "lm") + # Adds a linear regression line
+  geom_point(aes(x=cows_CA+cs_CA, y=cfap_CA, 
+                 size=Gross.cash.income/1000000), 
+             na.rm=TRUE, 
+             color="red"
+             ) +
+  geom_text(x=18, y=2.8, label="California", color="red") +
+  geom_text(x=39, y=5.9, label="US Average", color="red") +
+  labs(title = "CFAP1 and CFAP2 Payments to Farmers as Percent of 2019 Gross Cash Income",
+       x = "Percent of Gross Cash Income from Cattle, Milk, Corn, or Soybean Production", 
+       y = "CFAP1+CFAP2 as % of Gross Cash Income",
+       color="Corn&Soy %",
+       size="Gross Cash \n Income ($b)"
+       ) +
+  ylim(0,11.8) +
+  xlim(0,80) +
+  theme_minimal() +
+  theme(legend.position = "right", 
+        plot.title = element_text(hjust = 0.5),
+        axis.text = element_text(size = 12))
+ggsave("CFAP_percent.png")
+```
+
+### Another Exercise
+
+Let's visualize the net cash farm income in the United States by source from 1950 to 2021 using a stacked bar chart.
+
+```{r}
+plot_ni_df <- read.csv("FarmIncome.csv", header = TRUE)
+head(plot_ni_df)
+```
+
+```{r}
+# What are the x-axis and y-axis?
+# Which variable is mapped to color?
+# Use geom_bar() to create a bar chart.
+# You need to stack the bars to show contributions from different sources.
+# Set the argument stat = "identity" to use actual values instead of counts.
+plot_ni <- plot_ni_df %>% 
+  ggplot(aes(x=as.integer(year), y=value, fill=type)) +
+  geom_bar(position = "stack", stat="identity")+
+  labs(fill="Source", x = "Year", y = "$ Billion (Real 2021)")+
+  ggtitle(paste0("Net Farm Income: ", 1950, " to ", 2021))+
+  theme_minimal()+
+  theme(legend.position = "right", 
+        plot.title = element_text(hjust = 0.5))+
+  scale_fill_brewer(palette="Dark2")
+
+# Draw and save plot
+plot_ni
+ggsave(paste0("net_income_",1950,"_",2021,".png"))
+```
+
+## Performing Simple Regression in R
+
+#### Run a Simple Linear Regression
+
+The basic syntax for linear regression is `lm(y ~ x, data = df)`. This is to predict y using x (formula syntax: dependent_variable \~ independent_variable). And use `summary()` to see the estimated coefficients and statistics. For example,
+
+```{r}
+df <- df %>%
+  mutate(bigfour=cows+cs)
+
+model <- lm(cfap ~ bigfour, data = df)
+
+summary(model)
+```
+
+This output includes:
+
+-   Estimate (coefficients)
+
+-   R-squared (goodness of fit)
+
+-   p-values (statistical significance)
+
+-   F-statistic (overall model significance)
+
+#### Extract Coefficients and Other Model Outputs
+
+You can access specific regression results using:
+
+```{r}
+coef(model)  # Get estimated coefficients
+confint(model)  # Confidence intervals for coefficients
+head(residuals(model))  # Residuals (differences between actual and predicted values)
+head(fitted(model))  # Predicted values from the model
+```
+
+#### Predict New Values
+
+```{r}
+new_data <- data.frame(bigfour = c(6, 7, 8))  # Create new x-values
+predict(model, new_data)  # Predict y-values
+```
+
+## References
+
+Midway, Stephen R. "Principles of effective data visualization." *Patterns* 1, no. 9 (2020). [link](https://www.cell.com/patterns/fulltext/S2666-3899(20)30189-6)
+
+Wickham, Hadley. "A layered grammar of graphics." *Journal of computational and graphical statistics* 19, no. 1 (2010): 3-28. [link](http://byrneslab.net/classes/biol607/readings/wickham_layered-grammar.pdf)
+
+Wickham, Hadley, Mine Çetinkaya-Rundel, and Garrett Grolemund. *R for data science*. " O'Reilly Media, Inc.", 2023. [link](https://r4ds.hadley.nz/data-visualize)
