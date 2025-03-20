@@ -1,0 +1,338 @@
+---
+title: 'Section 2: Data Wrangling and Visualization'
+output:
+  pdf_document:
+    toc: yes
+    number_sections: yes
+  word_document:
+    toc: yes
+urlcolor: blue
+header-includes:
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \lhead{EEP 161 - Advanced Topics in Environmental and Resource Economics\\Spring 2025}
+  - \chead{}
+  - \rhead{Shuo Yu\\Section Handout 2 w/ solutions}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+setwd("C:/Users/shuoy/Dropbox/161/Sections/Section2")
+```
+
+# Data Wrangling
+
+## Tidyverse Grammar
+
+```{r,eval=FALSE}
+# Load the tidyverse package
+library(tidyverse)
+```
+
+```{r}
+# this should display the homepage of the documentation for tidyverse
+?tidyverse
+```
+
+```{r}
+# Set your working directory
+setwd("C:/Users/shuoy/Dropbox/161/Sections/Section2")
+
+# Example: Read egg price data.
+df <- read.csv("DailyPrices.csv")
+```
+
+We can check first several rows by using `head`. 
+```{r}
+head(df)
+```
+
+If you want to see all rows and columns, use `View()` or click the object in the environment pane.
+```{r}
+View(df)
+```
+
+We can do a quick summary of data by using `summary`.
+```{r}
+summary(df)
+```
+
+**Question:** What are the observations/units in the data? What are the variables?
+
+This dataframe is in "tidy" form. This means that **each row is an observation, each column is a variable, and each cell is a single value.**
+
+The `tidyverse` package that we installed earlier provides useful functions for transforming tidy data. In this section we will cover commonly used functions from the `tidyverse` package. Each of these commands work in a similar way.
+
+-   the first input is a tidy dataframe
+
+-   they output a new dataframe
+
+-   they can be "chained" together with piping - this means that the output of a function becomes the input of the next function
+
+## dplyr: Selecting Columns with `select()`
+
+The `select()` function is used to choose specific columns in a data frame. 
+- Use the colon operator `:` to select a range of variables.
+- Use the exclamation mark `!` or `-` to exclude variables from a selection.
+- Use `&` for intersection (common variables between sets).
+- Use `|` for union (all variables across sets).
+- Use c() to combine multiple selections.
+
+It supports helper functions for selecting columns based on patterns.Useful helpers include:
+
+- `everything()`: Moves specified columns to the beginning, retaining others in order (e.g., select(df, a, everything())).
+- `starts_with()` / `ends_with()`: Selects columns by prefix or suffix.
+- `contains()`: Matches columns containing a substring.
+- `matches()`: Uses regular expressions for flexible pattern matching.
+
+Notes: 
+- In R, functions working on data-frames are transitory: if you don't *save* the result, it just prints it.
+- You do not need to put quotation marks around the variable names. This is a convenient feature of all `tidyverse` functions.
+
+```{r}
+selected_df <- df %>%
+  select(Date, Low.Price, High.Price)
+colnames(selected_df)
+
+selected_df <- df %>% 
+  select(Date:High.Price)
+colnames(selected_df)
+
+selected_df <- df %>% 
+  select(!c(Low.Price, High.Price))
+colnames(selected_df)
+
+selected_df <- df %>%
+  select(-Low.Price, -High.Price)
+colnames(selected_df)
+
+reordered_df <- df %>%
+  select(Low.Price, everything())
+colnames(reordered_df)
+
+selected_df <- df %>%
+  select(starts_with("D"))
+colnames(selected_df)
+
+selected_df <- df %>%
+  select(ends_with("e"))
+colnames(selected_df)
+
+selected_df <- df %>%
+  select(contains("Price"))
+colnames(selected_df)
+
+selected_df <- df %>%
+  select(matches("^L.+e$")) # Regular expressions
+colnames(selected_df)
+```
+
+## Filtering Rows with `filter()`
+
+The `filter()` function is used to select rows based on logical conditions.
+```{r}
+# Filter rows where `Low.Price` equals 171
+df_filtered <- df %>%
+  filter(Low.Price == 171)
+summary(df_filtered)
+
+# Exclude rows where `Market.Name` is "CALIFORNIA"
+df_filtered <- df %>%
+  filter(Market.Name != "CALIFORNIA")
+table(df_filtered$Market.Name)
+
+# Filter rows where `Egg.Class` matches "LARGE" or "JUMBO"
+df_filtered <- df %>%
+  filter(Egg.Class %in% c("LARGE", "JUMBO"))
+table(df_filtered$Egg.Class)
+
+# Filter rows with multiple conditions (AND condition)
+df_filtered <- df %>%
+  filter(Low.Price >= 200 & High.Price <= 200)
+summary(df_filtered)
+
+# Filter rows with multiple conditions (OR condition)
+df_filtered <- df %>%
+  filter(Low.Price >= 200 | High.Price <= 200)
+summary(df_filtered)
+
+# Exclude rows with missing values in `Mostly.Low`
+df_filtered <- df %>%
+  filter(!is.na(Mostly.Low))
+summary(df_filtered)
+```
+
+**Question** The original dataframe `df` contains 42,702 rows and 10 columns. If we select the variables `Date`, `Market.Name`, `Egg.Class`, `Low.Price`, and `High.Price` and filter the rows where `Egg.Class` is either "LARGE" or "JUMBO," how many rows and columns will remain in the resulting dataframe?
+
+```{r}
+df_filtered <- df %>%
+  select(Date, Market.Name, Egg.Class, Low.Price, High.Price) %>%
+  filter(Egg.Class %in% c("LARGE", "JUMBO"))
+
+dim(df)
+
+dim(df_filtered)
+```
+**Question:** what are some ways we could check that we have filtered down to the correct observations? 
+
+```{r}
+# Hint: `summary()` is a useful function for checking the range of values of a continous variable.
+
+df_filtered <- df %>% 
+  select(Date, Market.Name, Egg.Class, Low.Price, High.Price) %>%
+  filter(Market.Name != "CALIFORNIA" & Low.Price >= 200 & High.Price <= 300)
+
+# Check price range
+summary(df_filtered)
+
+# Check the count of each market
+table(df_filtered$Market.Name)
+```
+
+## Adding or Changing Columns with `mutate()`
+
+The mutate() function adds new columns or modifies existing ones.
+```{r}
+# Applying multiple mutate() operations
+df_new <- df %>% 
+  select(Date, Market.Name, Low.Price, High.Price) %>%
+  mutate(Avg.Price = (Low.Price + High.Price) / 2, 
+         Price.Group= cut(Avg.Price, c(0, 200, 400, 600, 800, 1000)),
+         High.Price.Flag = if_else(Low.Price > 150, "Above 150", "Below 150"))
+
+unique(df_new$Price.Group)
+
+head(df_new)
+```
+## Sorting Data with `arrange()`
+
+The `arrange()` function sorts rows in a data frame. Use it to reorder data by one or more columns, either in ascending or descending order.
+
+```{r}
+# Sort data by a single column (ascending order by default)
+df_arrange <- df %>%
+  arrange(Low.Price)
+head(df_arrange)
+
+# Sort data in descending order
+df_arrange <- df %>%
+  arrange(desc(Low.Price))
+head(df_arrange)
+
+# Sort by multiple columns
+df_arrange <- df %>%
+  arrange(Market.Name, desc(Low.Price))
+head(df_arrange)
+
+# Challenge: Handling missing values (place them at the end)
+df_arrange <- df %>%
+  arrange(desc(!is.na(Low.Price)), Low.Price)
+head(df_arrange)
+```
+
+## Grouping data with `group_by()`
+
+The `group_by` operation is a powerful and flexible tool used in data analysis to split data into groups based on some criteria, perform computations on each group, and then combine the results into a summary form. The diagram below illustrates the general steps.
+
+![](C:/Users/shuoy/Dropbox/161/Sections/Section2/Groupby.png)
+```{r}
+# save the same dataframe but grouped by race
+df_group <- df %>%
+  group_by(Market.Name)
+
+glimpse(df_group)
+
+group_keys(df_group)
+```
+
+## Summarizing Data with `summarize()`
+
+The `summarize()` function creates summary statistics. Use it with `group_by()` for group-level summaries.
+
+```{r}
+# Compute the average miles per gallon
+df_summarize <- df %>%
+  summarize(avg_low_price = mean(Low.Price))
+df_summarize
+
+# Challenge: Missing values
+df_summarize <- df %>%
+  filter(!is.na(Low.Price)) %>%
+  summarize(avg_low_price = mean(Low.Price))
+df_summarize
+
+# Summarize by group
+df_summarize <- df %>%
+  filter(!is.na(Low.Price)) %>%
+  group_by(Market.Name) %>%
+  summarize(avg_low_price = mean(Low.Price), count = n())
+df_summarize
+
+```
+
+## Practice
+
+Starting with the original tidy dataset, perform the following calculations for each market:
+
+- Calculate the average low price for eggs classified as "EXTRA LARGE."
+
+- Calculate the proportion of "LARGE" eggs with High.Price ranging between 200 and 500.
+
+```{r}
+
+extra_large_avg <- df %>%
+  group_by(Market.Name) %>%
+  filter(Egg.Class == "EXTRA LARGE") %>%
+  summarize(Average.Low.Price = mean(Low.Price, na.rm = TRUE))
+print(extra_large_avg)
+
+large_egg_prop <- df %>%
+  filter(Egg.Class == "LARGE") %>%
+  group_by(Market.Name) %>%
+  summarize(
+    Proportion = sum(High.Price >= 200 & High.Price <= 500, na.rm = TRUE) / n()
+  )
+print(large_egg_prop)
+
+```
+
+# Data Visualization
+
+The most common set of tools for creating plots in R is `ggplot2`, which we will use throughout this course.
+
+In late 2022, egg prices quintupled due to a severe outbreak of avian flu (H5N1), which led to the culling of millions of chickens and significantly reduced the supply of eggs. A similar situation is unfolding now, with California wholesale egg prices surpassing their 2022 peak (unadjusted for inflation). For more details, refer to the blog [Eggflation Returns with a Vengeance](https://agdatanews.substack.com/p/more-than-half-of-californias-dairy?r=i2qe&utm_campaign=post&utm_medium=web&triedRedirect=true). Let's replicate the first figure from the blog here.
+
+```{r}
+df$Date <- as.Date(df$Date, format = "%Y-%m-%d")
+
+start_date <- as.Date("2019-01-01")
+
+## Plot prices
+plot_prices <- df %>%
+  arrange(Date) %>%
+  filter(Date>=start_date) %>%
+  filter(Egg.Class %in% c("LARGE")) %>%
+  filter(Market.Name %in% c("CALIFORNIA","IOWA-MINNESOTA-WISCONSIN")) %>%
+  mutate(Market.Name=str_to_title(
+  ifelse(Market.Name=="IOWA-MINNESOTA-WISCONSIN","Midwest",Market.Name))) %>%
+  mutate(Price=(Low.Price+High.Price)/2) %>%
+  ggplot(
+    aes(
+      x=Date,
+      y=Price,
+      color=factor(Market.Name, levels=c("California","Midwest")))) +
+  geom_line(linewidth=1) +
+  labs(x = "", 
+       y="Cents per Dozen", 
+       color="State", 
+       caption="Source: https://www.marketnews.usda.gov/mnp/py-report-config?category=Egg\n https://agdatanews.substack.com") +
+  ggtitle("Wholesale Large Egg Prices")+
+  theme_minimal()+
+  scale_color_brewer(palette = "Dark2") +
+  theme(plot.title = element_text(hjust = 0.5,size=16), text = element_text(size=12))
+
+# draw and save plot
+plot_prices
+ggsave(paste0("daily_egg_prices_2024_",start_date,".png"),bg="white") 
+```
