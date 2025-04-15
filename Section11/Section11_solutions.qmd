@@ -1,0 +1,313 @@
+---
+title: "Section 11: Adoption of Cover Crops and No-Till: Patterns and Incentives in the U.S."
+author: "Shuo Yu"
+format: html
+date: "4/9/2025"
+---
+
+## 1. Introduction
+
+-   **Cover Crops**: Plants grown primarily to cover and protect the soil rather than for harvest.
+
+    -   Reduce soil erosion from wind and water.
+
+    -   Improve soil fertility (especially legumes fixing nitrogen).
+
+    -   Enhance water quality by reducing runoff and nutrient loss.
+
+    -   Suppress weeds by outcompeting them for light and nutrients.
+
+    -   Store carbon in soil, aiding climate mitigation.
+
+-   **No-Till Farming**: An agricultural practice where crops are planted without tilling the soil. Seeds are directly sown into undisturbed soil, preserving structure and moisture.
+
+    -   Preserve soil structure and prevent erosion.
+
+    -   Retain soil moisture and reduce evaporation.
+
+    -   Promote soil organic carbon storage.
+
+    -   Lower greenhouse gas emissions through reduced fuel use.
+
+    -   Support biodiversity including beneficial soil microbes and wildlife.
+
+## 2. National Adoption Trends
+
+The U.S. Agricultural Census, conducted every five years by the USDA, provides the most comprehensive snapshot of American agriculture, covering land use, production practices, operator demographics, and conservation efforts.
+
+For this analysis, we retrieved state-level data on conservation practices, specifically, cover crop and no-till acreage, from the [USDA NASS Quick Stats database](https://quickstats.nass.usda.gov/).
+
+![](CSP.png)The key variables in `CSP.csv` include:
+
+-   Year: Census years, 2012, 2017, and 2022
+
+-   State: U.S. state in which the acreage was reported
+
+-   Data Item: Conservation practice type
+
+-   Value: Reported acreage under each practice
+
+![](CroplandArea.png)
+
+The key variables in `CroplandArea.csv` include:
+
+-   Year: Census years, 2012, 2017, and 2022
+
+-   State: U.S. state in which the acreage was reported
+
+-   Value: Reported cropland total acreage planted
+
+These state-level data allow us to track adoption patterns and regional variation in conservation practices across the United States over time.
+
+```{r}
+#| warning: false
+
+rm(list = ls())
+
+# Load required libraries
+library(tidyverse)
+
+setwd("C:/Users/shuoy/Dropbox/161/Sections/Section11")
+```
+
+```{r}
+# Read in the CSV
+CSP <- read_csv("CSP.csv")
+
+# Check structure
+glimpse(CSP)
+
+# Check unique values in column `Data Item`
+unique(CSP$`Data Item`)
+
+# View rows with missing Value
+CSP %>% filter(is.na(Value))
+
+# Keep only relevant columns: Year, State, `State ANSI`, `Data Item`, and Value
+# Recode long practice names to 'notill' and 'covercrop'
+CSP <- CSP %>%
+  select(Year, State, `State ANSI`, `Data Item`, Value)  %>%
+  rename(Area = Value)%>%
+  mutate(`Data Item` = case_when(
+    `Data Item` == "PRACTICES, LAND USE, CROPLAND, CONSERVATION TILLAGE, NO-TILL - ACRES" ~ "notill",
+    `Data Item` == "PRACTICES, LAND USE, CROPLAND, COVER CROP PLANTED, (EXCL CRP) - ACRES" ~ "covercrop",
+    TRUE ~ `Data Item`  # keep original if unmatched
+  ))
+```
+
+```{r}
+# Read in the CSV
+area <- read_csv("CroplandArea.csv")
+
+# Check structure
+glimpse(area)
+
+# Keep only relevant columns: Year, `State ANSI`, and Value
+# Rename Value to TotalArea
+area <- area %>%
+  select(Year, `State ANSI`, Value) %>%
+  rename(CroplandArea = Value)
+```
+
+```{r}
+# Merge CSP with area by Year and State ANSI
+CSP <- CSP %>%
+  left_join(area, by = c("Year", "State ANSI"))
+
+# Remove rows with missing TotalArea and calculate share of acreage (pct)
+CSP <- CSP %>% 
+  filter(!is.na(CroplandArea)) %>% 
+  filter(CroplandArea>0) %>% 
+  mutate(pct = Area/CroplandArea)
+```
+
+```{r}
+glimpse(CSP)
+```
+
+```{r}
+# Summarize to national level
+national_trends <- CSP %>%
+  group_by(Year, `Data Item`) %>%
+  summarise(
+    TotalArea = sum(Area, na.rm = TRUE),
+    TotalCropland = sum(CroplandArea, na.rm = TRUE),
+    pct = TotalArea / TotalCropland,
+    .groups = "drop"
+  )
+
+# Plot 1: Total acreage of each practice over time
+ggplot(national_trends, aes(x = Year, y = TotalArea, color = `Data Item`, group = `Data Item`)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = c(2012, 2017, 2022)) +
+  labs(
+    title = "Total U.S. Acreage under No-Till and Cover Crops (2012–2022)",
+    x = "Year", y = "Total Acreage",
+    color = "Practice"
+  ) +
+  theme_minimal()
+
+# Plot 2: Percent of cropland under each practice over time
+ggplot(national_trends, aes(x = Year, y = pct, color = `Data Item`, group = `Data Item`)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_x_continuous(breaks = c(2012, 2017, 2022)) +
+  labs(
+    title = "Percent of Cropland in No-Till and Cover Crops (2012–2022)",
+    x = "Year", y = "Percent of Total Cropland",
+    color = "Practice"
+  ) +
+  theme_minimal()
+```
+
+**Question**: How have national adoption levels of cover crops and no-till changed from 2012 to 2022, both in total acreage and as a share of cropland?
+
+Between 2012 and 2022, the total acreage of both cover crops and no-till practices increased in the U.S. Cover crop adoption rose from 10.3 million acres (3.2%) to 17.9 million acres (5.8%), while no-till expanded from 96.5 million acres (29.8%) to 105.2 million acres (33.9%). The adoption rate of no-till remains substantially higher, but cover crops have shown faster relative growth.
+
+## 3. Regional Variation
+
+```{r}
+# Pivot to wide format
+CSP_wide <- CSP %>%
+  pivot_wider(
+    id_cols = c(State, `State ANSI`),
+    names_from = c(Year, `Data Item`),
+    values_from = c(Area, pct, CroplandArea),
+    names_glue = "{`Data Item`}{.value}{Year}"
+  ) %>%
+  mutate(
+    NTAreaChange = notillArea2022 - notillArea2012,
+    CCAreaChange = covercropArea2022 - covercropArea2012,
+    NTPctChange = notillpct2022 - notillpct2012,
+    CCPctChange = covercroppct2022 - covercroppct2012
+  )
+
+glimpse(CSP_wide)
+```
+
+```{r}
+# Load U.S. state shapefile
+library(ggplot2)
+library(maps)
+
+# Get U.S. state geometry
+states_map <- map_data("state")
+
+# Lowercase state names to match
+CSP_wide$region <- tolower(CSP_wide$State)
+
+# Join CSP data with map data
+map_data_CSP <- left_join(states_map, CSP_wide, by = "region")
+```
+
+```{r}
+# Plot the map – change in no-till area
+ggplot(map_data_CSP, aes(long, lat, group = group, fill = NTAreaChange)) +
+  geom_polygon(color = "white") +
+  coord_fixed(1.3) +
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "blue", midpoint = 0,
+    name = "No-Till Area Change\n(2022 - 2012)"
+  ) +
+  labs(title = "Change in No-Till Area by State (2012–2022)") +
+  theme_void()
+```
+
+**Question**: Which regions have seen the largest increases in no-till adoption between 2012 and 2022, and what factors might explain these patterns?
+
+This map shows the change in no-till acreage by U.S. state from 2012 to 2022, with the largest increases concentrated in the Midwest, particularly Iowa, Missouri, and Illinois. These states saw gains exceeding 1.5 million acres, while others, especially in the West and Northeast, experienced smaller or negligible changes. This regional pattern may reflect a combination of factors, including greater cropland availability, targeted conservation programs like EQIP and CSP, and state-level support in the Corn Belt. Additionally, no-till is often more compatible with large-scale row crop systems common in the Midwest.
+
+```{r}
+# Plot the map – change in cover crop area
+ggplot(map_data_CSP, aes(long, lat, group = group, fill = CCAreaChange)) +
+  geom_polygon(color = "white") +
+  coord_fixed(1.3) +
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "blue", midpoint = 0,
+    name = "Cover Crop Area \n(2022 - 2012)"
+  ) +
+  labs(title = "Change in Cover Crop Area by State (2012–2022)") +
+  theme_void()
+
+```
+
+```{r}
+# Plot the map – change in cover crop area
+ggplot(map_data_CSP, aes(long, lat, group = group, fill = CCPctChange)) +
+  geom_polygon(color = "white") +
+  coord_fixed(1.3) +
+  scale_fill_gradient2(
+    low = "red", mid = "white", high = "blue", midpoint = 0,
+    name = "Cover Crop Area Percent\n(2022 - 2012)"
+  ) +
+  labs(title = "Change in Cover Crop Area Percent by State (2012–2022)") +
+  theme_void()
+
+```
+
+**Question**: Which states have seen the largest increases in cover crop adoption from 2012 to 2022, and what factors might be driving these regional differences?
+
+This map shows the change in cover crop acreage by U.S. state from 2012 to 2022, highlighting the greatest increases in states like Iowa, Texas, and Missouri. While most states experienced some growth, the intensity and scale of adoption varied. The Midwest and South saw the largest gains, likely due to a combination of federal incentives (e.g., EQIP, Pandemic Cover Crop Program), state-level initiatives (like Maryland’s cover crop cost-share programs), and increasing awareness of soil health and climate resilience benefits. These areas also tend to have large-scale row crop operations where cover crops can be more readily integrated.
+
+While absolute acreage growth was concentrated in the Midwest and South, the second figure reveals that relative growth was highest in Northeastern states like Maine and Vermont, and in California, where the percentage of cropland under cover crops increased by over 10 percentage points. These regional differences may reflect smaller total cropland bases, state-specific conservation programs, or increased interest in regenerative practices in areas with more diversified or specialty crop systems.
+
+## 4. Policy Drivers: Conservation and Climate Initiatives
+
+-   **Environmental Quality Incentives Program (EQIP)**
+
+    -   Federal (USDA-NRCS) cost-share program supporting adoption of cover crops, no-till, and nutrient management.
+
+    -   Provides \$1.5–1.8 billion annually; further boosted by \$8+ billion from the Inflation Reduction Act (IRA, 2022).
+
+    -   Reduces upfront costs of implementing conservation practices.
+
+-   **Conservation Stewardship Program (CSP)**
+
+    -   Federal (USDA-NRCS) program rewarding whole-farm conservation.
+
+    -   Pays producers for maintaining or enhancing long-term soil health practices like continuous no-till or diverse cover crops.
+
+    -   Encourages long-term integration of climate-smart practices into farm systems.
+
+-   **Conservation Compliance: Highly Erodible Lands and Wetlands Provisions**
+
+    -   Federal (USDA-FSA) requirement for eligibility in farm programs.
+
+    -   Producers must avoid tilling highly erodible lands or converting wetlands for agriculture.
+
+    -   Indirectly promotes no-till on erosion-prone land through compliance rules.
+
+-   **Pandemic Cover Crop Program (2021–2022)**
+
+    -   Federal (USDA-RMA) one-time insurance-based incentive during COVID-19.
+
+    -   Provided \$5/acre premium discount for cover crop acres (\~12 million acres enrolled).
+
+    -   Demonstrated effectiveness of insurance incentives for scaling adoption.
+
+-   **State Cover Crop Cost-Share Programs**
+
+    -   State/local initiatives in MD, PA, OH, IN, and others.
+
+    -   Maryland pays \$45–\$75/acre for winter cover crops (via Chesapeake Bay protection).
+
+    -   Major adoption driver; MD achieved 50%+ cover crop usage on eligible acres.
+
+    -   Explains regional variation in adoption (especially in Southeast and Mid-Atlantic).
+
+-   **Climate-Smart Agriculture Initiatives**
+
+    -   Federal and public-private programs targeting climate resilience.
+
+    -   IRA (2022) allocated \$19.5 billion to conservation for climate mitigation.
+
+    -   USDA’s Climate-Smart Commodities initiative funds pilot payments for cover crops and no-till.
+
+    -   Supports carbon markets and climate-labeled products to boost adoption.
+
+## References
+
+Plastina, Alejandro, Wendiam Sawadgo, and Emmanuel Okonkwo. "Pervasive Disadoption Substantially Offsets New Adoption of Cover Crops and No-Till." Choices 39, no. 2 (2024): 1-14. [link](https://ageconsearch.umn.edu/record/344738/?v=pdf)
