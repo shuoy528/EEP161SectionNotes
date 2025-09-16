@@ -1,0 +1,248 @@
+---
+title: "Section 12: Climatic Drivers of Conservation Practice Adoption"
+author: "Shuo Yu"
+format: html
+date: "4/16/2025"
+---
+
+## 1. Introduction
+
+Building on the adoption trends and regional variations identified in Section 11, this section explores the role of climatic factors in shaping county-level adoption of cover crops and no-till practices across the U.S. Using Agricultural Census data from 2017 and 2022, we examine how weather patterns influence the extent and intensity of adoption.
+
+## 2. Data and Variables
+
+Dependent variables:
+
+-   Cover Crop Area and No-Till Area (in acres)
+
+-   Cover Crop Share and No-Till Share (as % of cropland)
+
+Independent variables:
+
+-   GDD: Sum of degree days between base and upper temperature thresholds
+
+-   EDD: Sum of extreme heat days above thresholds
+
+-   Precipitation: Total annual rainfall
+
+Fixed effects:
+
+-   Year fixed effects
+
+-   Region/state/county fixed effects
+
+Data sources:
+
+-   USDA Agricultural Census (county-level conservation and cropland data)
+
+-   PRISM Climate Group (weather data)
+
+```{r}
+#| warning: false
+
+rm(list = ls())
+
+# Load required libraries
+library(tidyverse)
+library(fixest)
+
+setwd("C:/Users/shuoy/Dropbox/161/Sections/Section12")
+```
+
+```{r}
+# Read in the CSV
+CSP <- read_csv("CSP.csv")
+
+# Check structure
+glimpse(CSP)
+
+# Check unique values in column `Data Item`
+unique(CSP$`Data Item`)
+
+# View rows with missing Value
+CSP %>% filter(is.na(Value))
+
+# Keep relevant columns: Year, `State ANSI`, `County ANSI`, `Data Item`, Value
+# Create a FIPS code by combining State ANSI and County ANSI into a single 5-digit string
+# Convert `Value` column from character to numeric
+# Rename `Value` to `Area`
+# Drop rows where the column Area is NA
+# Recode long practice names to 'notill' and 'covercrop'
+CSP <- CSP %>%
+  select(Year, `State ANSI`, `County ANSI`, `Data Item`, Value) %>%
+  mutate(
+    FIPS = paste0(`State ANSI`, `County ANSI`),
+    Value = as.numeric(gsub(",", "", Value))
+    ) %>%
+  rename(Area = Value) %>%
+  filter(!is.na(Area)) %>%
+  mutate(`Data Item` = case_when(
+    `Data Item` == "PRACTICES, LAND USE, CROPLAND, CONSERVATION TILLAGE, NO-TILL - ACRES" ~ "notill",
+    `Data Item` == "PRACTICES, LAND USE, CROPLAND, COVER CROP PLANTED, (EXCL CRP) - ACRES" ~ "covercrop",
+    TRUE ~ `Data Item`  # keep original if unmatched
+  ))
+```
+
+```{r}
+# Read in the CSV
+area <- read_csv("AcresOperated.csv")
+
+# Check structure
+glimpse(area)
+
+# Keep only relevant columns: Year, `State ANSI`, `County ANSI`, Value
+# Create a FIPS code by combining State ANSI and County ANSI into a single 5-digit string
+# Convert `Value` column from character to numeric
+# Rename `Value` to `TotalArea`
+# Drop rows where the column TotalArea and `County ANSI` is NA
+area <- area %>%
+  select(Year, `State ANSI`, `County ANSI`, Value) %>%
+  mutate(
+    FIPS = paste0(`State ANSI`, `County ANSI`),
+    Value = as.numeric(gsub(",", "", Value))
+    ) %>%
+  rename(TotalArea = Value) %>%
+  filter(!is.na(TotalArea)) %>%
+  filter(!is.na(`County ANSI`)) %>%
+  select(-`State ANSI`, -`County ANSI`)
+```
+
+```{r}
+# Merge CSP with area by Year and FIPS
+CSP <- CSP %>%
+  left_join(area, by = c("Year", "FIPS"))
+
+# Remove rows with missing TotalArea and calculate share of acreage (pct)
+CSP <- CSP %>% 
+  filter(!is.na(Area)) %>% 
+  filter(TotalArea>0) %>% 
+  mutate(pct = Area/TotalArea)
+```
+
+```{r}
+glimpse(CSP)
+```
+
+```{r}
+# Summarize to national level
+national_trends <- CSP %>%
+  group_by(Year, `Data Item`) %>%
+  summarise(
+    Area = sum(Area, na.rm = TRUE),
+    LandArea = sum(TotalArea, na.rm = TRUE),
+    pct = Area / LandArea,
+    .groups = "drop"
+  )
+```
+
+```{r}
+weather <- read.csv("Weather.csv", header = TRUE)
+
+# Convert GEOID into 5-digit character strings with leading zeros
+weather <- weather %>%
+  mutate(FIPS = str_pad(as.character(GEOID), width = 5, side = "left", pad = "0")) %>%
+  select(-GEOID)
+```
+
+```{r}
+CSP <- CSP %>%
+  left_join(weather, by = c("Year", "FIPS"))
+
+covercrop <- CSP %>%
+  filter(`Data Item`=='covercrop')
+
+notill <- CSP %>%
+  filter(`Data Item`=='notill')
+```
+
+
+## 3. Regression Framework and Results
+
+We estimate the following linear model:
+
+$Y_{it}=\beta_{1}GDD_{it} + \beta_{2}EDD_{it} + \beta_{3}PPT_{it} + \beta_{4}PPT^{2}_{it} + \gamma_{i} + \epsilon_{it}$
+
+where $Y_{it}$ is either conservation acreage or share in county $i$, year $t$, and $\gamma_{i}$ denotes county fixed effects. The model allows us to assess whether climate trends are predictive of conservation behavior across counties.
+
+```{r}
+# Outcome variable: pct
+# Practice: cover crop
+# No fixed effects
+model <- feols(
+  pct ~ gdd + edd + ppt + I(ppt^2),
+  data = covercrop,
+  cluster = ~ FIPS
+)
+
+# View results
+summary(model)
+```
+```{r}
+# Outcome variable: pct
+# Practice: cover crop
+# Year fixed effects
+model2 <- feols(
+  pct ~ gdd + edd + ppt + I(ppt^2) | Year,
+  data = covercrop,
+  cluster = ~ FIPS
+)
+
+# View results
+summary(model2)
+```
+
+```{r}
+# Outcome variable: pct
+# Practice: cover crop
+# County fixed effects
+model3 <- feols(
+  pct ~ gdd + edd + ppt + I(ppt^2)| FIPS,
+  data = covercrop,
+  cluster = ~ FIPS
+)
+
+# View results
+summary(model3)
+```
+
+```{r}
+# Outcome variable: Area
+# Practice: cover crop
+# County fixed effects
+model4 <- feols(
+  Area ~ gdd + edd + ppt + I(ppt^2)| FIPS,
+  data = covercrop,
+  cluster = ~ FIPS
+)
+
+# View results
+summary(model4)
+```
+
+```{r}
+# Outcome variable: pct
+# Practice: no till
+# County fixed effects
+model5 <- feols(
+  pct ~ gdd + edd + ppt + I(ppt^2)| FIPS,
+  data = notill,
+  cluster = ~ FIPS
+)
+
+# View results
+summary(model5)
+```
+
+**Questions**:
+
+1. Do warmer growing seasons (higher GDD) promote or inhibit adoption?
+
+Across all model specifications, higher Growing Degree Days (GDD) are consistently associated with a positive and statistically significant effect on conservation practice adoption, indicating that warmer growing seasons promote adoption. This could reflect several mechanisms: warmer conditions may extend the planting window for cover crops, improve their biomass productivity, or make no-till systems more feasible by reducing the risk of delayed emergence.
+
+2. Do more extreme events (higher EDD) promote or inhibit adoption?
+
+Higher Extreme Degree Days (EDD), which capture the frequency or intensity of very hot days, are consistently associated with a negative and statistically significant effect on cover crop adoption across all model specifications. This suggests that more extreme heat events tend to inhibit adoption of cover crops. One possible explanation is that extreme heat can stress crops, reduce soil moisture, or interfere with planting and establishment. Cover crops are often seeded after harvest or in early fall, when residual heat and soil moisture conditions are critical for germination. In years with more extreme heat days, farmers may be concerned about poor cover crop establishment, lower biomass production, or greater water stress, making adoption less appealing.
+
+3. What happens to the coefficients of $ppt$ and $ppt^2$ when we include county fixed effects?
+
+The reversal in the sign of the precipitation (PPT) coefficient and its squared term across model specifications reflects differences in how variation is identified. In the county fixed effects model, the estimates are based on within-county variation over time, capturing how changes in precipitation within the same county affect adoption behavior. Here, the negative linear and positive squared terms suggest a U-shaped relationship, where both low and high levels of precipitation are associated with greater adoption, possibly due to concerns about drought and runoff, respectively. In contrast, models without county fixed effects rely more on cross-sectional variation, where counties with higher average precipitation tend to have systematically different practices, potentially leading to an inverted-U shape. This suggests that failing to control for unobserved county characteristics may conflate long-run structural differences with short-run climate responses.
